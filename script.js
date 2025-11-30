@@ -202,6 +202,91 @@ function reorderStrips(stripsData, sourceId, destStrip, destIndex) {
     return next;
 }
 
+function simulateListMove(order, sourceId, destIndex) {
+    const list = [...order];
+    const srcIndex = list.indexOf(sourceId);
+    if (srcIndex === -1) return list;
+    const [item] = list.splice(srcIndex, 1);
+    const bounded = Math.max(0, Math.min(destIndex, list.length));
+    list.splice(bounded, 0, item);
+    return list;
+}
+
+function simulateStripsMove(stripsData, sourceId, destStrip, destIndex) {
+    const next = stripsData.map(strip => [...strip]);
+    const srcStripIdx = next.findIndex(strip => strip.includes(sourceId));
+    if (srcStripIdx === -1) return next;
+    const srcPos = next[srcStripIdx].indexOf(sourceId);
+    if (srcPos === -1) return next;
+
+    const boundedStrip = Math.max(0, Math.min(destStrip, next.length - 1));
+    const targetStrip = next[boundedStrip];
+    const [item] = next[srcStripIdx].splice(srcPos, 1);
+    let insertPos = Math.max(0, Math.min(destIndex, targetStrip.length));
+    targetStrip.splice(insertPos, 0, item);
+    return next;
+}
+
+function buildSlotMap() {
+    if (!lastLayout || !lastLayout.boxes) return null;
+    const boxMap = new Map();
+    lastLayout.boxes.forEach(box => {
+        if (box && box.img && box.img.id) {
+            boxMap.set(box.img.id, box);
+        }
+    });
+
+    const slotsByStrip = [];
+    const baseOrderStrips = [];
+
+    if (hanModeEnabled && strips.length) {
+        strips.forEach((strip, stripIndex) => {
+            const ids = strip.filter(Boolean);
+            baseOrderStrips.push([...ids]);
+            const slots = [];
+            ids.forEach((id, idx) => {
+                const box = boxMap.get(id);
+                if (box) {
+                    slots.push({
+                        id,
+                        stripIndex,
+                        orderIndex: idx,
+                        box
+                    });
+                }
+            });
+            slotsByStrip.push(slots);
+        });
+    } else {
+        const ids = loadedImages.map(img => img.id);
+        baseOrderStrips.push([...ids]);
+        const slots = [];
+        ids.forEach((id, idx) => {
+            const box = boxMap.get(id);
+            if (box) {
+                slots.push({
+                    id,
+                    stripIndex: 0,
+                    orderIndex: idx,
+                    box
+                });
+            }
+        });
+        slotsByStrip.push(slots);
+    }
+
+    const flatSlots = slotsByStrip.flat();
+    const idToSlot = new Map();
+    flatSlots.forEach(slot => idToSlot.set(slot.id, slot));
+
+    return {
+        slots: flatSlots,
+        slotsByStrip,
+        baseOrderStrips,
+        idToSlot
+    };
+}
+
 function mapIdsToImages(order) {
     return order.map(id => findImageById(id)).filter(Boolean);
 }
@@ -920,6 +1005,89 @@ function deleteImage(id) {
 
 let activeReorderSession = null;
 
+class VisualPreviewEngine {
+    constructor(slotMap, sourceId) {
+        this.slotMap = slotMap;
+        this.sourceId = sourceId;
+        this.hanMode = hanModeEnabled;
+    }
+
+    getElement(id) {
+        return previewContainer.querySelector(`[data-id="${id}"]`);
+    }
+
+    resetElement(id) {
+        const el = this.getElement(id);
+        if (!el) return;
+        el.classList.remove('preview-shift');
+        el.style.transform = '';
+    }
+
+    resetAll() {
+        if (!this.slotMap) return;
+        this.slotMap.slots.forEach(slot => this.resetElement(slot.id));
+    }
+
+    computeOrder(dest) {
+        if (!this.slotMap) return [];
+        const base = this.slotMap.baseOrderStrips || [];
+        if (!dest || dest.index === null || dest.index === undefined) {
+            return base.map(strip => [...strip]);
+        }
+        if (this.hanMode) {
+            return simulateStripsMove(base, this.sourceId, dest.stripIndex ?? 0, dest.index);
+        }
+        const flatBase = base[0] || [];
+        return [simulateListMove(flatBase, this.sourceId, dest.index)];
+    }
+
+    apply(dest) {
+        if (!this.slotMap) return;
+        const orderStrips = this.computeOrder(dest);
+        if (!orderStrips.length) {
+            this.resetAll();
+            return;
+        }
+
+        const flatOrder = orderStrips.flat();
+        const flatSlots = this.slotMap.slots;
+        const touched = new Set();
+
+        flatOrder.forEach((id, newIdx) => {
+            const targetSlot = flatSlots[newIdx];
+            const currentSlot = this.slotMap.idToSlot.get(id);
+            if (!targetSlot || !currentSlot) return;
+
+            const el = this.getElement(id);
+            if (!el) return;
+
+            if (id === this.sourceId) {
+                // Dragged item由 mirror 负责，复位即可
+                this.resetElement(id);
+                return;
+            }
+
+            const dx = (targetSlot.box.x - currentSlot.box.x);
+            const dy = (targetSlot.box.y - currentSlot.box.y);
+            const negligible = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5;
+            if (negligible) {
+                this.resetElement(id);
+            } else {
+                el.classList.add('preview-shift');
+                el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+            }
+            touched.add(id);
+        });
+
+        // Clear transforms for untouched items
+        this.slotMap.slots.forEach(slot => {
+            if (!touched.has(slot.id)) {
+                this.resetElement(slot.id);
+            }
+        });
+    }
+}
+
 function applyInsertHysteresis(fraction, prevInsertAfter) {
     if (fraction > HYSTERESIS_FORWARD) return true;
     if (fraction < HYSTERESIS_BACKWARD) return false;
@@ -936,15 +1104,15 @@ class ReorderSession {
         this.hanMode = hanModeEnabled;
         this.containerRect = previewContainer.getBoundingClientRect();
         this.startScale = currentScale || 1;
-        this.boxes = (lastLayout?.boxes || []).filter(b => b && b.img);
-        this.draftOrder = this.hanMode ? [] : loadedImages.map(img => img.id);
-        this.initialOrder = this.draftOrder ? [...this.draftOrder] : [];
-        this.draftStrips = this.hanMode ? cloneStripsData() : [];
-        this.initialStrips = this.hanMode ? cloneStripsData() : [];
+        this.slotMap = buildSlotMap();
+        this.previewEngine = this.slotMap ? new VisualPreviewEngine(this.slotMap, sourceId) : null;
+        this.baseOrderStrips = this.slotMap?.baseOrderStrips || [];
         this.currentSignature = this.computeCurrentSignature();
+        this.startSignature = this.currentSignature;
         this.currentHint = null;
         this.active = true;
         this.lastPointer = startClient ? { ...startClient } : null;
+        this.currentDest = null;
 
         dragSrcId = sourceId;
         lastReorderTargetId = null;
@@ -960,13 +1128,15 @@ class ReorderSession {
 
     computeCurrentSignature() {
         if (this.hanMode) {
-            const stripIdx = findStripIndexById(this.sourceId);
+            const base = this.baseOrderStrips;
+            const stripIdx = base.findIndex(strip => strip.includes(this.sourceId));
             if (stripIdx === -1) return null;
-            const pos = strips[stripIdx].indexOf(this.sourceId);
+            const pos = base[stripIdx].indexOf(this.sourceId);
             if (pos === -1) return null;
             return `han-${stripIdx}-${pos}`;
         }
-        const idx = loadedImages.findIndex(img => img.id === this.sourceId);
+        const base = this.baseOrderStrips[0] || [];
+        const idx = base.indexOf(this.sourceId);
         return idx >= 0 ? `idx-${idx}` : null;
     }
 
@@ -978,58 +1148,64 @@ class ReorderSession {
     }
 
     resolveTarget(relX, relY) {
-        if (!this.boxes.length) return null;
+        if (!this.slotMap || !this.slotMap.slots.length) return null;
+        const slots = this.slotMap.slots;
+        const useY = this.hanMode;
 
-        const hitBox = this.boxes.find(box =>
-            relX >= box.x &&
-            relX <= box.x + box.width &&
-            relY >= box.y &&
-            relY <= box.y + box.height
+        const hitSlot = slots.find(slot =>
+            relX >= slot.box.x &&
+            relX <= slot.box.x + slot.box.width &&
+            relY >= slot.box.y &&
+            relY <= slot.box.y + slot.box.height
         );
 
-        if (hitBox) {
-            if (hitBox.img.id === this.sourceId) {
+        if (hitSlot) {
+            if (hitSlot.id === this.sourceId) {
                 return { targetId: null, insertAfter: false };
             }
-            const fraction = (relX - hitBox.x) / hitBox.width;
-            const prevAfter = this.currentHint && this.currentHint.targetId === hitBox.img.id ? this.currentHint.insertAfter : null;
-            const insertAfter = applyInsertHysteresis(fraction, prevAfter);
-            return { targetId: hitBox.img.id, insertAfter, fraction, via: 'hit' };
+            const base = useY ? (relY - hitSlot.box.y) / hitSlot.box.height : (relX - hitSlot.box.x) / hitSlot.box.width;
+            const prevAfter = this.currentHint && this.currentHint.targetId === hitSlot.id ? this.currentHint.insertAfter : null;
+            const insertAfter = applyInsertHysteresis(base, prevAfter);
+            return { targetId: hitSlot.id, insertAfter, fraction: base, via: 'hit' };
         }
 
         let otherBoxes;
         if (!this.hanMode) {
-            const rowBoxes = this.boxes.filter(box => {
-                if (box.img.id === this.sourceId) return false;
-                return relY >= box.y && relY <= box.y + box.height;
+            const rowBoxes = slots.filter(slot => {
+                if (slot.id === this.sourceId) return false;
+                return relY >= slot.box.y && relY <= slot.box.y + slot.box.height;
             });
-            otherBoxes = rowBoxes.length > 0 ? rowBoxes : this.boxes.filter(b => b.img.id !== this.sourceId);
+            otherBoxes = rowBoxes.length > 0 ? rowBoxes : slots.filter(b => b.id !== this.sourceId);
         } else {
-            otherBoxes = this.boxes.filter(b => b.img.id !== this.sourceId);
+            otherBoxes = slots.filter(b => b.id !== this.sourceId);
         }
         if (!otherBoxes.length) return null;
 
-        const leftmost = otherBoxes.reduce((min, b) => (b.x < min.x ? b : min), otherBoxes[0]);
-        const rightmost = otherBoxes.reduce((max, b) => ((b.x + b.width) > (max.x + max.width) ? b : max), otherBoxes[0]);
+        const startKey = useY ? 'y' : 'x';
+        const sizeKey = useY ? 'height' : 'width';
+        const pointerAxis = useY ? relY : relX;
 
-        if (relX < leftmost.x - EDGE_DEAD_ZONE) {
-            return { targetId: leftmost.img.id, insertAfter: false, via: 'edge' };
+        const leftmost = otherBoxes.reduce((min, b) => (b.box[startKey] < min.box[startKey] ? b : min), otherBoxes[0]);
+        const rightmost = otherBoxes.reduce((max, b) => ((b.box[startKey] + b.box[sizeKey]) > (max.box[startKey] + max.box[sizeKey]) ? b : max), otherBoxes[0]);
+
+        if (pointerAxis < leftmost.box[startKey] - EDGE_DEAD_ZONE) {
+            return { targetId: leftmost.id, insertAfter: false, via: 'edge' };
         }
-        if (relX > rightmost.x + rightmost.width + EDGE_DEAD_ZONE) {
-            return { targetId: rightmost.img.id, insertAfter: true, via: 'edge' };
+        if (pointerAxis > rightmost.box[startKey] + rightmost.box[sizeKey] + EDGE_DEAD_ZONE) {
+            return { targetId: rightmost.id, insertAfter: true, via: 'edge' };
         }
 
         const boundaries = [];
         otherBoxes.forEach(box => {
             boundaries.push({
-                id: box.img.id,
+                id: box.id,
                 insertAfter: false,
-                dist: Math.abs(relX - box.x)
+                dist: Math.abs(pointerAxis - box.box[startKey])
             });
             boundaries.push({
-                id: box.img.id,
+                id: box.id,
                 insertAfter: true,
-                dist: Math.abs(relX - (box.x + box.width))
+                dist: Math.abs(pointerAxis - (box.box[startKey] + box.box[sizeKey]))
             });
         });
         boundaries.sort((a, b) => a.dist - b.dist);
@@ -1045,7 +1221,7 @@ class ReorderSession {
     computeDestination(targetId, insertAfter) {
         if (!targetId) return null;
         if (this.hanMode) {
-            const stripsData = this.draftStrips.length ? this.draftStrips : cloneStripsData();
+            const stripsData = this.slotMap?.baseOrderStrips?.length ? this.slotMap.baseOrderStrips : cloneStripsData();
             const srcStripIdx = stripsData.findIndex(strip => strip.includes(this.sourceId));
             const targetStripIdx = stripsData.findIndex(strip => strip.includes(targetId));
             if (srcStripIdx === -1 || targetStripIdx === -1) return null;
@@ -1056,7 +1232,7 @@ class ReorderSession {
             return { stripIndex: targetStripIdx, index: destPos, signature: `han-${targetStripIdx}-${destPos}` };
         }
 
-        const order = this.draftOrder.length ? this.draftOrder : loadedImages.map(img => img.id);
+        const order = (this.slotMap?.baseOrderStrips?.[0]) ? this.slotMap.baseOrderStrips[0] : loadedImages.map(img => img.id);
         const srcIndex = order.indexOf(this.sourceId);
         const targetIndex = order.indexOf(targetId);
         if (srcIndex === -1 || targetIndex === -1) return null;
@@ -1064,15 +1240,6 @@ class ReorderSession {
         if (srcIndex < destinationIndex) destinationIndex -= 1;
         destinationIndex = Math.max(0, Math.min(destinationIndex, order.length - 1));
         return { stripIndex: null, index: destinationIndex, signature: `idx-${destinationIndex}` };
-    }
-
-    applyDraft(dest) {
-        if (!dest) return;
-        if (this.hanMode) {
-            this.draftStrips = reorderStrips(this.draftStrips.length ? this.draftStrips : cloneStripsData(), this.sourceId, dest.stripIndex, dest.index);
-            return;
-        }
-        this.draftOrder = reorderList(this.draftOrder.length ? this.draftOrder : loadedImages.map(img => img.id), this.sourceId, dest.index);
     }
 
     updateInsertHint(targetId, insertAfter) {
@@ -1100,52 +1267,47 @@ class ReorderSession {
         const target = this.resolveTarget(relative.x, relative.y);
         if (!target || !target.targetId) {
             this.updateInsertHint(null, false);
+            if (this.previewEngine) this.previewEngine.apply(null);
+            this.currentDest = null;
             return;
         }
 
         const dest = this.computeDestination(target.targetId, target.insertAfter);
-        if (!dest) return;
+        if (!dest) {
+            if (this.previewEngine) this.previewEngine.apply(null);
+            return;
+        }
 
         if (dest.signature === this.currentSignature) {
             this.updateInsertHint(target.targetId, target.insertAfter);
             return;
         }
 
-        this.applyDraft(dest);
+        this.currentDest = dest;
         this.currentSignature = dest.signature;
         this.updateInsertHint(target.targetId, target.insertAfter);
+        if (this.previewEngine) {
+            this.previewEngine.apply(dest);
+        }
     }
 
     hasChanges() {
-        if (this.hanMode) {
-            if (this.initialStrips.length !== this.draftStrips.length) return true;
-            for (let i = 0; i < this.initialStrips.length; i++) {
-                if (this.initialStrips[i].length !== this.draftStrips[i].length) return true;
-                for (let j = 0; j < this.initialStrips[i].length; j++) {
-                    if (this.initialStrips[i][j] !== this.draftStrips[i][j]) return true;
-                }
-            }
-            return false;
-        }
-        if (this.initialOrder.length !== this.draftOrder.length) return true;
-        for (let i = 0; i < this.initialOrder.length; i++) {
-            if (this.initialOrder[i] !== this.draftOrder[i]) return true;
-        }
-        return false;
+        return !!(this.currentDest && this.currentDest.signature && this.currentDest.signature !== this.startSignature);
     }
 
     commit() {
+        if (!this.currentDest) return;
         if (this.hanMode) {
-            if (this.draftStrips.length) {
-                strips = this.draftStrips.map(strip => [...strip]);
-                flattenStripsToImages();
-            }
+            const base = this.slotMap?.baseOrderStrips?.length ? this.slotMap.baseOrderStrips : cloneStripsData();
+            const nextStrips = simulateStripsMove(base, this.sourceId, this.currentDest.stripIndex ?? 0, this.currentDest.index ?? 0);
+            strips = nextStrips.map(strip => [...strip]);
+            flattenStripsToImages();
         } else {
-            if (this.draftOrder.length) {
-                const reordered = mapIdsToImages(this.draftOrder);
-                if (reordered.length) {
-                    loadedImages = reordered;
-                }
+            const base = (this.slotMap?.baseOrderStrips?.[0]) ? this.slotMap.baseOrderStrips[0] : loadedImages.map(img => img.id);
+            const nextOrder = simulateListMove(base, this.sourceId, this.currentDest.index ?? 0);
+            const reordered = mapIdsToImages(nextOrder);
+            if (reordered.length) {
+                loadedImages = reordered;
             }
         }
         render();
@@ -1155,6 +1317,8 @@ class ReorderSession {
         if (!this.active) return;
         if (commit && this.hasChanges()) {
             this.commit();
+        } else if (this.previewEngine) {
+            this.previewEngine.resetAll();
         }
         this.cleanup();
     }
@@ -1172,6 +1336,9 @@ class ReorderSession {
         lastReorderTargetId = null;
         lastDragPosition = null;
         setInsertHint(null, false);
+        if (this.previewEngine) {
+            this.previewEngine.resetAll();
+        }
     }
 }
 

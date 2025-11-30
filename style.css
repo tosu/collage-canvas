@@ -457,6 +457,11 @@ input[type="color"]::-webkit-color-swatch {
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(99, 102, 241, 0.25);
 }
 
+.preview-shift {
+    transition: transform 150ms ease-out;
+    will-change: transform;
+}
+
 /* Delete Button */
 .delete-btn {
     position: absolute;
