@@ -732,9 +732,11 @@ clearBtn.addEventListener('click', () => {
 
 // Export
 exportBtn.addEventListener('click', () => {
-    if (loadedImages.length === 0) return;
-
     const canvases = renderStripsToCanvases();
+    if (!canvases.length) {
+        showToast('没有可导出的图片');
+        return;
+    }
     canvases.forEach((canvas, idx) => {
         const link = document.createElement('a');
         const suffix = canvases.length > 1 ? `_${String(idx + 1).padStart(2, '0')}` : '';
@@ -746,11 +748,23 @@ exportBtn.addEventListener('click', () => {
 
 // Copy
 copyBtn.addEventListener('click', () => {
-    if (loadedImages.length === 0) return;
-    if (hanModeEnabled) return;
-
     const canvases = renderStripsToCanvases();
-    Promise.all(canvases.map(canvas => new Promise(resolve => canvas.toBlob(resolve, 'image/png'))))
+    if (!canvases.length) {
+        showToast('没有可复制的图片');
+        return;
+    }
+
+    Promise.all(canvases.map(canvas => new Promise(resolve => {
+        canvas.toBlob((blob) => {
+            if (blob) return resolve(blob);
+            try {
+                const fallback = dataUrlToBlob(canvas.toDataURL('image/png'));
+                resolve(fallback);
+            } catch (err) {
+                resolve(null);
+            }
+        }, 'image/png');
+    })))
         .then(blobs => blobs.filter(Boolean))
         .then(blobs => {
             if (!blobs.length) throw new Error('No image blobs generated');
@@ -776,16 +790,23 @@ function renderStripsToCanvases() {
     const padding = Number.isFinite(rawPadding) ? Math.max(0, rawPadding) : 10;
     const bgColor = bgColorInput.value;
 
-    const stripsForRender = hanModeEnabled ? getRenderStrips() : [loadedImages];
+    const stripsRaw = hanModeEnabled ? getRenderStrips() : [loadedImages];
+    const stripsForRender = (stripsRaw && stripsRaw.length ? stripsRaw : [loadedImages]).map(strip =>
+        (strip || []).filter(img => img && img.element)
+    );
     const results = [];
 
     // 导出模式：不包含分隔线，每个长图只包含图片内容
     stripsForRender.forEach(stripImages => {
         if (!stripImages || !stripImages.length) return;
         const layout = computeStripLayout(stripImages, targetRowHeight, padding);
+        if (!layout || !layout.boxes || !layout.boxes.length) return;
+        const width = Math.max(1, Math.round(layout.containerWidth || 0));
+        const height = Math.max(1, Math.round(layout.containerHeight || 0));
+        if (!width || !height) return;
         const canvas = document.createElement('canvas');
-        canvas.width = layout.containerWidth;
-        canvas.height = layout.containerHeight;
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = bgColor;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -796,6 +817,20 @@ function renderStripsToCanvases() {
     });
 
     return results;
+}
+
+function dataUrlToBlob(dataUrl) {
+    const arr = dataUrl.split(',');
+    if (arr.length < 2) return null;
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
 }
 
 async function handleFiles(files) {
