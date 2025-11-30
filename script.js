@@ -816,6 +816,29 @@ function renderStripsToCanvases() {
         results.push(canvas);
     });
 
+    // Fallback: if no results but we have images, try a simple layout in normal mode
+    if (!results.length && loadedImages.length > 0) {
+        const widthRaw = parseInt(canvasWidthInput.value, 10);
+        const fallbackWidth = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : 1920;
+        const layout = window.calculateLayout(loadedImages, fallbackWidth, targetRowHeight, padding);
+        if (layout && layout.boxes && layout.boxes.length) {
+            const width = Math.max(1, Math.round(layout.containerWidth || fallbackWidth));
+            const height = Math.max(1, Math.round(layout.containerHeight || targetRowHeight));
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            layout.boxes.forEach(box => {
+                if (box.img && box.img.element) {
+                    ctx.drawImage(box.img.element, box.x, box.y, box.width, box.height);
+                }
+            });
+            results.push(canvas);
+        }
+    }
+
     return results;
 }
 
