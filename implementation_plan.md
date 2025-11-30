@@ -1,42 +1,41 @@
-# 拖拽排序实时预览方案（原生 JS，interact.js 风格）
+# Slot 感知拖拽预览优化方案（跨 strip 友好）
 
 ## 目标
-- 拖拽中提供顺滑、可预期的实时预览：空出槽位、其他项让位，指哪放哪，无闪烁/抖动。
-- 桌面与移动端共用一套排序内核与预览引擎；兼容汉化多 strip 布局与缩放/平移。
-- 不破坏现有导出/文件拖入/缩放功能，保持性能（尽量只做 transform 与 rAF）。
+- 解决汉化多 strip 横向布局下跨 strip（尤其首/尾）命中困难的问题，让拖拽“指哪放哪”。
+- 保持现有实时预览的流畅性：只用 transform 让位，数据在 drop 时一次提交。
+- 兼容桌面/移动统一通路，缩放/平移状态下命中准确，无闪烁。
 
-## 关键思路（结合 interact.js 示例/Pro 特性）
-- **数据与视觉分离**：拖拽时不改业务数组/DOM 顺序；仅维护“视觉槽位”并用 transform 预览，drop 时一次性 commit。
-- **slot 离散 + 迟滞**：pointer 映射到 slot（网格/索引），进入 slot 的 30%/70% 以后才认定切换，避免边界 ping-pong。
-- **几何快照**：drag-start 记录 `lastLayout` 的基准坐标（含 strip 偏移、scale/pan 快照），命中与 transform 计算都基于快照，render 期间不漂移。
-- **预览引擎**：维护 `dragIndex` / `targetIndex`（或 strip+index），根据两者计算每个 item 的“视觉槽位”，对非拖拽项应用 `translate3d` 让位；拖拽项用 mirror 跟手。
-- **动画**：非拖拽项的 transform 走短时过渡或 spring（CSS transition 120~180ms ease-out），拖拽项无过渡。
-- **状态机**：`start → move(slotChange?) → preview transform → drop/cancel`，只有 slot 变更才触发预览重排；取消时复位所有 transform。
+## 主要痛点（现状）
+- 判定轴错误：汉化模式下 `resolveTarget` 仍用 Y 轴作为主轴；strip 是按 X 排列，跨列时几乎不会触发 edge/命中。
+- 缺少虚拟 slot：slotMap 仅包含已有图片 box，没有“头/尾”虚拟槽；想插到 strip 的最前或最后没有可命中的区域。
+- 预览源节点未让位：被拖元素保持在起点（透明但不移位），在跨 strip 时遮挡/误导。
+- 边界判定未分离：edge 与 nearest 逻辑耦合到单轴，跨 strip 时无独立的“选 strip → 选位”流程。
+
+## 设计原则
+- **先选 strip，再选位置**：按 X 轴（汉化）确定目标 strip，再按 Y 轴（或顺序）确定插入索引；普通模式保持单列逻辑。
+- **显式虚拟槽**：为每个 strip 构建 `head` / `tail` slot，提供首/尾插入的命中区域，配合迟滞。
+- **拖拽源让位**：源元素在预览中也随视觉槽位移动（或隐藏），避免原地残影干扰判定。
+- **状态机 + 迟滞**：slot 变更才触发预览更新；跨 strip/跨槽各自有 0.3/0.7 迟滞阈值。
+- **快照计算**：继续使用 drag-start 的 layout/scale/pan 快照，预览仅用 transform，不触发布局重排。
 
 ## 实施计划
-1) **SlotMap 构建与指针映射**
-   - 基于 `lastLayout` 构建 slot 列表：含 stripId、index、box(x,y,w,h)、进入前/后阈值（0.3/0.7）和末尾 slot（尾部插入）。
-   - drag-start 保存 scale/pan/baseOffset 快照；提供 `client → logical` 的转换；封装 `hitTestSlot(relX, relY)` 返回 slot + insertAfter。
+1) **SlotMap 增强**
+   - 为每个 strip 生成 `head` / `tail` 虚拟 slot（坐标覆盖 strip 区域的顶部/底部或前/后），写入 `type: 'head'|'tail'`。
+   - 在汉化模式下，slot 包含 `stripIndex`、`xRange`、`yRange`；普通模式保持一维。
 
-2) **预览引擎（VisualPreviewEngine）**
-   - 记录 `dragSlot`（起点）与 `targetSlot`（当前命中），提供 `computeVisualSlotIndex(itemSlot, dragSlot, targetSlot)`，对同 strip/同列按“空出一格”的规则计算视觉索引。
-   - 输出每个 item 应用的 `translate3d(dx, dy)`（相对其原始 box），拖拽项用 mirror 跟手，非拖拽项添加/更新 `preview-transform` 样式并设置 transition。
-   - 支持跨 strip：targetSlot 若在其他 strip，视觉计算需考虑 strip 偏移（x 基础位移），并允许/禁止跨 strip 按当前规则。
+2) **命中与边界判定重写**
+   - 汉化：先根据 X 轴落点选择 strip（含 DEAD_ZONE），无匹配时保持当前 strip；strip 内再用 Y 轴 + 迟滞计算插入点，允许命中 head/tail slot。
+   - 普通模式：沿现有轴，但支持 head/tail slot，迟滞不变。
+   - edge 逻辑：当落点超出 strip 左/右侧时，直接指向目标 strip 的 head/tail，确保首尾易达。
 
-3) **输入集成（鼠标/触摸统一）**
-   - pointerdown/long-press 启动 session：创建 mirror，锁定 slotMap 快照；禁用/绕过 HTML5 原生排序 drag，仅保留文件拖入。
-   - pointermove/touchmove：用 slotMap + 迟滞计算新 targetSlot，仅当 slot 变更时调用预览引擎刷新 transform；其余帧只移动 mirror。
-   - pointerup/cancel：若 targetSlot 有变化则 commit（更新 `loadedImages/strips`），否则放弃；清理 mirror 与所有 transform。
+3) **预览源节点移动/隐藏**
+   - 在预览引擎中，对 `sourceId` 应用与视觉槽位一致的 transform（或在拖拽时隐藏源节点并用 mirror/placeholder 占位）；取消后复位。
 
-4) **Commit / Cancel 与复位**
-   - drop 时：根据 dragSlot→targetSlot 对 `loadedImages` 或 `strips` 做一次 move；清零所有 `preview-transform` 样式与 transition，调用 `render()` 使 DOM 顺序与视觉一致。
-   - cancel 时：不改数据，移除所有预览 transform 和指示器。
+4) **VisualPreviewEngine 调整**
+   - 基于目标 slot 重新计算视觉顺序：`dragSlot → targetSlot`，空出一格并给源节点应用 transform。
+   - 预览输入使用增强的 slotMap（含虚拟槽），strip 切换时只在 slot 改变时更新。
 
-5) **样式与性能**
-   - 新增 CSS 类：`.preview-shift { transition: transform 150ms ease-out; will-change: transform; }`；拖拽项 `.dragging` 无过渡。
-   - 预览刷新用 rAF，计算轻量（基于快照与索引，不读写布局）；避免在 move 中触发 `render()`。
-
-6) **验收用例**
-   - 桌面：拖拽任意项，其他项平滑让位；临界 ±5px 不抖；放开后位置正确；缩放/平移状态下命中仍准确。
-   - 移动：长按拖拽同样顺滑；双指缩放后仍能正确命中；快速滑动不丢事件。
-   - 汉化模式：跨/内 strip 让位正确，末尾插入正常，分隔线不漂移；文件拖入/导出无回归。
+5) **验收清单**
+   - 汉化模式：跨 strip 到首/尾一拖即中；横向移动能稳定切 strip，纵向能精准落位；源节点不留原地残影。
+   - 普通模式：首尾插入正常；预览依旧平滑。
+   - 缩放/平移状态下命中正确；取消拖拽时 transform 清理干净。
