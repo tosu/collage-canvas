@@ -801,8 +801,8 @@ function renderStripsToCanvases() {
         if (!stripImages || !stripImages.length) return;
         const layout = computeStripLayout(stripImages, targetRowHeight, padding);
         if (!layout || !layout.boxes || !layout.boxes.length) return;
-        const width = Math.max(1, Math.round(layout.containerWidth || 0));
-        const height = Math.max(1, Math.round(layout.containerHeight || 0));
+        const width = Number.isFinite(layout.containerWidth) ? Math.max(1, Math.round(layout.containerWidth)) : null;
+        const height = Number.isFinite(layout.containerHeight) ? Math.max(1, Math.round(layout.containerHeight)) : null;
         if (!width || !height) return;
         const canvas = document.createElement('canvas');
         canvas.width = width;
@@ -1760,7 +1760,8 @@ function getHanBaseWidth(targetRowHeight) {
 
 function computeStripLayout(images, targetRowHeight, padding) {
     if (!hanModeEnabled) {
-        const containerWidth = parseInt(canvasWidthInput.value, 10) || 1920;
+        const raw = parseInt(canvasWidthInput.value, 10);
+        const containerWidth = Number.isFinite(raw) && raw > 0 ? raw : 1920;
         return window.calculateLayout(images, containerWidth, targetRowHeight, padding);
     }
     const baseWidth = getHanBaseWidth(targetRowHeight);
