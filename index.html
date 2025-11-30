@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>拼图生成器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="mobile-styles.css">
+</head>
+
+<body>
+    <!-- Mobile Top Bar (hidden on desktop) -->
+    <header class="mobile-header">
+        <button class="menu-toggle" id="menuToggle" aria-label="打开菜单">
+            <span class="hamburger-icon"></span>
+        </button>
+        <h1 class="mobile-title">拼图生成器</h1>
+        <div class="mobile-actions">
+            <button class="icon-btn" id="mobileExport" title="导出">📥</button>
+        </div>
+    </header>
+
+    <!-- Sidebar Overlay (for drawer backdrop) -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <div class="app-container">
+        <aside class="sidebar glass-panel">
+            <div class="logo-area">
+                <h1>拼图生成器</h1>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <label for="canvasWidth">画布宽度 (px)</label>
+                    <input type="number" id="canvasWidth" value="1920" min="100" max="3840">
+                    <input type="range" id="canvasWidthSlider" min="100" max="3840" value="1920">
+                </div>
+
+                <div class="control-group">
+                    <label for="targetRowHeight">目标行高 (px)</label>
+                    <input type="number" id="targetRowHeight" value="300" min="50" max="2160">
+                    <input type="range" id="rowHeightSlider" min="50" max="2160" value="300">
+                </div>
+
+                <div class="control-group">
+                    <label for="padding">图片间距 (px)</label>
+                    <input type="number" id="padding" value="10" min="0" max="100">
+                    <input type="range" id="paddingSlider" min="0" max="100" value="10">
+                </div>
+
+                <div class="control-group">
+                    <label for="bgColor">背景颜色</label>
+                    <div class="color-input-wrapper">
+                        <input type="color" id="bgColor" value="#1a1a1a">
+                        <span id="bgColorValue">#1a1a1a</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="toggle">
+                        <input type="checkbox" id="hanModeToggle">
+                        <span class="slider"></span>
+                        <span class="toggle-label">长图发布模式</span>
+                    </label>
+                </div>
+
+                <div class="control-group han-controls" id="hanControls" style="display: none;">
+                    <label for="hanStripCount">切分数量</label>
+                    <div class="inline-input">
+                        <input type="number" id="hanStripCount" min="1" placeholder="例如：3">
+                        <button class="btn secondary-btn" type="button" id="hanGenerateBtn">生成</button>
+                    </div>
+                    <label for="hanSingleWidth">单图宽度限制（可选）</label>
+                    <input type="number" id="hanSingleWidth" min="1" max="1000" placeholder="留空则自动计算">
+                    <input type="range" id="hanSingleWidthSlider" min="1" max="1000" value="800">
+                    <div class="hint-text">将拼图自动切分为多张长图，适合社交媒体发布</div>
+                </div>
+
+                <div class="control-group button-group">
+                    <button class="btn primary-btn" id="exportBtn">导出图片 (PNG)</button>
+                    <button class="btn primary-btn" id="copyBtn">复制到剪贴板</button>
+                    <button class="btn secondary-btn" id="clearBtn">清空画布</button>
+                </div>
+            </div>
+
+            <div class="status-bar">
+                <span id="imageCount">0 张图片</span>
+                <span id="canvasSize">0 x 0 px</span>
+                <span id="zoomDisplay">100%</span>
+            </div>
+        </aside>
+
+        <main class="main-area">
+            <div id="dropZone" class="drop-zone">
+                <input type="file" id="fileInput" accept="image/*" multiple hidden>
+
+                <div class="empty-state">
+                    <div class="drop-card">
+                        <div class="icon">🖼️</div>
+                        <h3>智能拼图工具</h3>
+                        <p>拖拽图片至此，或点击上传</p>
+                        <div class="hint">支持 PNG / JPG / GIF 等常见格式</div>
+                        <button class="btn primary-btn ghost-btn" type="button">选择图片</button>
+                    </div>
+                </div>
+
+                <div id="previewWrapper" class="preview-wrapper">
+                    <div id="previewContainer" class="preview-container"></div>
+                    <div class="preview-hint" aria-hidden="true">滚轮缩放 · 中键拖拽平移 · 双击复位</div>
+                </div>
+
+                <canvas id="exportCanvas" class="export-canvas" aria-hidden="true"></canvas>
+                <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="layout.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>
