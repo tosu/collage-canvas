@@ -46,6 +46,7 @@ const GAP_THRESHOLD = 8;
 const HYSTERESIS_FORWARD = 0.7;
 const HYSTERESIS_BACKWARD = 0.3;
 const MIN_POINTER_MOVE = 4;
+const HEAD_TAIL_ZONE = 60;
 
 // Get wrapper padding dynamically from CSS variable (responsive)
 function getWrapperPadding() {
@@ -238,12 +239,18 @@ function buildSlotMap() {
 
     const slotsByStrip = [];
     const baseOrderStrips = [];
+    const hitZones = [];
+    const stripMeta = [];
 
     if (hanModeEnabled && strips.length) {
         strips.forEach((strip, stripIndex) => {
             const ids = strip.filter(Boolean);
             baseOrderStrips.push([...ids]);
             const slots = [];
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
             ids.forEach((id, idx) => {
                 const box = boxMap.get(id);
                 if (box) {
@@ -253,14 +260,53 @@ function buildSlotMap() {
                         orderIndex: idx,
                         box
                     });
+                    minX = Math.min(minX, box.x);
+                    maxX = Math.max(maxX, box.x + box.width);
+                    minY = Math.min(minY, box.y);
+                    maxY = Math.max(maxY, box.y + box.height);
                 }
             });
+            if (slots.length > 0) {
+                const zoneWidth = maxX - minX;
+                const head = {
+                    type: 'head',
+                    stripIndex,
+                    box: {
+                        x: minX,
+                        y: Math.max(0, minY - HEAD_TAIL_ZONE),
+                        width: zoneWidth,
+                        height: HEAD_TAIL_ZONE
+                    }
+                };
+                const tail = {
+                    type: 'tail',
+                    stripIndex,
+                    box: {
+                        x: minX,
+                        y: maxY,
+                        width: zoneWidth,
+                        height: HEAD_TAIL_ZONE
+                    }
+                };
+                hitZones.push(head, tail);
+                stripMeta.push({
+                    stripIndex,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY
+                });
+            }
             slotsByStrip.push(slots);
         });
     } else {
         const ids = loadedImages.map(img => img.id);
         baseOrderStrips.push([...ids]);
         const slots = [];
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
         ids.forEach((id, idx) => {
             const box = boxMap.get(id);
             if (box) {
@@ -270,8 +316,42 @@ function buildSlotMap() {
                     orderIndex: idx,
                     box
                 });
+                minX = Math.min(minX, box.x);
+                maxX = Math.max(maxX, box.x + box.width);
+                minY = Math.min(minY, box.y);
+                maxY = Math.max(maxY, box.y + box.height);
             }
         });
+        if (slots.length > 0) {
+            const zoneWidth = maxX - minX;
+            hitZones.push({
+                type: 'head',
+                stripIndex: 0,
+                box: {
+                    x: minX,
+                    y: Math.max(0, minY - HEAD_TAIL_ZONE),
+                    width: zoneWidth,
+                    height: HEAD_TAIL_ZONE
+                }
+            });
+            hitZones.push({
+                type: 'tail',
+                stripIndex: 0,
+                box: {
+                    x: minX,
+                    y: maxY,
+                    width: zoneWidth,
+                    height: HEAD_TAIL_ZONE
+                }
+            });
+            stripMeta.push({
+                stripIndex: 0,
+                minX,
+                maxX,
+                minY,
+                maxY
+            });
+        }
         slotsByStrip.push(slots);
     }
 
@@ -283,7 +363,9 @@ function buildSlotMap() {
         slots: flatSlots,
         slotsByStrip,
         baseOrderStrips,
-        idToSlot
+        idToSlot,
+        hitZones,
+        stripMeta
     };
 }
 
@@ -1061,12 +1143,6 @@ class VisualPreviewEngine {
             const el = this.getElement(id);
             if (!el) return;
 
-            if (id === this.sourceId) {
-                // Dragged item由 mirror 负责，复位即可
-                this.resetElement(id);
-                return;
-            }
-
             const dx = (targetSlot.box.x - currentSlot.box.x);
             const dy = (targetSlot.box.y - currentSlot.box.y);
             const negligible = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5;
@@ -1147,65 +1223,138 @@ class ReorderSession {
         };
     }
 
+    pickStripIndex(relX) {
+        const metas = this.slotMap?.stripMeta || [];
+        if (!metas.length) return 0;
+        const containing = metas.find(m => relX >= m.minX - EDGE_DEAD_ZONE && relX <= m.maxX + EDGE_DEAD_ZONE);
+        if (containing) return containing.stripIndex;
+        // fallback to nearest by center
+        let nearest = metas[0];
+        let best = Math.abs(relX - ((nearest.minX + nearest.maxX) / 2));
+        metas.forEach(m => {
+            const dist = Math.abs(relX - ((m.minX + m.maxX) / 2));
+            if (dist < best) {
+                best = dist;
+                nearest = m;
+            }
+        });
+        return nearest.stripIndex;
+    }
+
     resolveTarget(relX, relY) {
         if (!this.slotMap || !this.slotMap.slots.length) return null;
-        const slots = this.slotMap.slots;
-        const useY = this.hanMode;
+
+        // Han mode: choose strip by X first, then Y slot
+        if (this.hanMode) {
+            const stripIndex = this.pickStripIndex(relX);
+            const stripSlots = this.slotMap.slotsByStrip[stripIndex] || [];
+            const zones = (this.slotMap.hitZones || []).filter(z => z.stripIndex === stripIndex);
+
+            // First check head/tail zones
+            const zoneHit = zones.find(z =>
+                relX >= z.box.x &&
+                relX <= z.box.x + z.box.width &&
+                relY >= z.box.y &&
+                relY <= z.box.y + z.box.height
+            );
+            if (zoneHit) {
+                return this.mapZoneToTarget(zoneHit, stripSlots);
+            }
+
+            // Check item slots by Y
+            const slotHit = stripSlots.find(slot =>
+                relY >= slot.box.y &&
+                relY <= slot.box.y + slot.box.height
+            );
+            if (slotHit) {
+                if (slotHit.id === this.sourceId) {
+                    return { targetId: null, insertAfter: false };
+                }
+                const frac = (relY - slotHit.box.y) / slotHit.box.height;
+                const prevAfter = this.currentHint && this.currentHint.targetId === slotHit.id ? this.currentHint.insertAfter : null;
+                const insertAfter = applyInsertHysteresis(frac, prevAfter);
+                return { targetId: slotHit.id, insertAfter, fraction: frac, via: 'hit' };
+            }
+
+            // Edge: above head / below tail
+            const meta = (this.slotMap.stripMeta || []).find(m => m.stripIndex === stripIndex);
+            if (meta) {
+                if (relY < (meta.minY - EDGE_DEAD_ZONE)) {
+                    const headZone = zones.find(z => z.type === 'head');
+                    if (headZone) return this.mapZoneToTarget(headZone, stripSlots, 'edge');
+                }
+                if (relY > (meta.maxY + EDGE_DEAD_ZONE)) {
+                    const tailZone = zones.find(z => z.type === 'tail');
+                    if (tailZone) return this.mapZoneToTarget(tailZone, stripSlots, 'edge');
+                }
+            }
+
+            // Nearest boundary within strip
+            if (!stripSlots.length) return null;
+            const boundaries = [];
+            stripSlots.forEach(box => {
+                boundaries.push({
+                    id: box.id,
+                    insertAfter: false,
+                    dist: Math.abs(relY - box.box.y)
+                });
+                boundaries.push({
+                    id: box.id,
+                    insertAfter: true,
+                    dist: Math.abs(relY - (box.box.y + box.box.height))
+                });
+            });
+            boundaries.sort((a, b) => a.dist - b.dist);
+            const nearest = boundaries[0];
+            const second = boundaries[1];
+            if (!nearest) return null;
+            if (second && Math.abs(nearest.dist - second.dist) <= GAP_THRESHOLD && this.currentHint) {
+                return { targetId: this.currentHint.targetId, insertAfter: this.currentHint.insertAfter, via: 'gap-hold' };
+            }
+            return { targetId: nearest.id, insertAfter: nearest.insertAfter, via: 'boundary' };
+        }
+
+        // Non-han: single strip logic with head/tail zones
+        const zones = (this.slotMap.hitZones || []).filter(z => z.stripIndex === 0);
+        const zoneHit = zones.find(z =>
+            relY >= z.box.y &&
+            relY <= z.box.y + z.box.height &&
+            relX >= z.box.x &&
+            relX <= z.box.x + z.box.width
+        );
+        const slots = this.slotMap.slotsByStrip[0] || [];
+        if (zoneHit) {
+            return this.mapZoneToTarget(zoneHit, slots);
+        }
 
         const hitSlot = slots.find(slot =>
-            relX >= slot.box.x &&
-            relX <= slot.box.x + slot.box.width &&
             relY >= slot.box.y &&
-            relY <= slot.box.y + slot.box.height
+            relY <= slot.box.y + slot.box.height &&
+            relX >= slot.box.x &&
+            relX <= slot.box.x + slot.box.width
         );
-
         if (hitSlot) {
             if (hitSlot.id === this.sourceId) {
                 return { targetId: null, insertAfter: false };
             }
-            const base = useY ? (relY - hitSlot.box.y) / hitSlot.box.height : (relX - hitSlot.box.x) / hitSlot.box.width;
+            const frac = (relY - hitSlot.box.y) / hitSlot.box.height;
             const prevAfter = this.currentHint && this.currentHint.targetId === hitSlot.id ? this.currentHint.insertAfter : null;
-            const insertAfter = applyInsertHysteresis(base, prevAfter);
-            return { targetId: hitSlot.id, insertAfter, fraction: base, via: 'hit' };
+            const insertAfter = applyInsertHysteresis(frac, prevAfter);
+            return { targetId: hitSlot.id, insertAfter, fraction: frac, via: 'hit' };
         }
 
-        let otherBoxes;
-        if (!this.hanMode) {
-            const rowBoxes = slots.filter(slot => {
-                if (slot.id === this.sourceId) return false;
-                return relY >= slot.box.y && relY <= slot.box.y + slot.box.height;
-            });
-            otherBoxes = rowBoxes.length > 0 ? rowBoxes : slots.filter(b => b.id !== this.sourceId);
-        } else {
-            otherBoxes = slots.filter(b => b.id !== this.sourceId);
-        }
-        if (!otherBoxes.length) return null;
-
-        const startKey = useY ? 'y' : 'x';
-        const sizeKey = useY ? 'height' : 'width';
-        const pointerAxis = useY ? relY : relX;
-
-        const leftmost = otherBoxes.reduce((min, b) => (b.box[startKey] < min.box[startKey] ? b : min), otherBoxes[0]);
-        const rightmost = otherBoxes.reduce((max, b) => ((b.box[startKey] + b.box[sizeKey]) > (max.box[startKey] + max.box[sizeKey]) ? b : max), otherBoxes[0]);
-
-        if (pointerAxis < leftmost.box[startKey] - EDGE_DEAD_ZONE) {
-            return { targetId: leftmost.id, insertAfter: false, via: 'edge' };
-        }
-        if (pointerAxis > rightmost.box[startKey] + rightmost.box[sizeKey] + EDGE_DEAD_ZONE) {
-            return { targetId: rightmost.id, insertAfter: true, via: 'edge' };
-        }
-
+        if (!slots.length) return null;
         const boundaries = [];
-        otherBoxes.forEach(box => {
+        slots.forEach(box => {
             boundaries.push({
                 id: box.id,
                 insertAfter: false,
-                dist: Math.abs(pointerAxis - box.box[startKey])
+                dist: Math.abs(relY - box.box.y)
             });
             boundaries.push({
                 id: box.id,
                 insertAfter: true,
-                dist: Math.abs(pointerAxis - (box.box[startKey] + box.box[sizeKey]))
+                dist: Math.abs(relY - (box.box.y + box.box.height))
             });
         });
         boundaries.sort((a, b) => a.dist - b.dist);
@@ -1216,6 +1365,19 @@ class ReorderSession {
             return { targetId: this.currentHint.targetId, insertAfter: this.currentHint.insertAfter, via: 'gap-hold' };
         }
         return { targetId: nearest.id, insertAfter: nearest.insertAfter, via: 'boundary' };
+    }
+
+    mapZoneToTarget(zone, stripSlots, via = 'zone') {
+        if (!stripSlots || !stripSlots.length) return null;
+        const firstId = stripSlots[0]?.id;
+        const lastId = stripSlots[stripSlots.length - 1]?.id;
+        if (zone.type === 'head' && firstId) {
+            return { targetId: firstId, insertAfter: false, via };
+        }
+        if (zone.type === 'tail' && lastId) {
+            return { targetId: lastId, insertAfter: true, via };
+        }
+        return null;
     }
 
     computeDestination(targetId, insertAfter) {
