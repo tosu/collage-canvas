@@ -1156,16 +1156,26 @@ class VisualPreviewEngine {
         return previewContainer.querySelector(`[data-id="${id}"]`);
     }
 
-    resetElement(id) {
+    resetElement(id, instant = false) {
         const el = this.getElement(id);
         if (!el) return;
+        if (instant) {
+            const prev = el.style.transition;
+            el.style.transition = 'none';
+            el.classList.remove('preview-shift');
+            el.style.transform = '';
+            // force reflow to apply the no-transition reset
+            void el.offsetWidth;
+            el.style.transition = prev;
+            return;
+        }
         el.classList.remove('preview-shift');
         el.style.transform = '';
     }
 
-    resetAll() {
+    resetAll(instant = false) {
         if (!this.slotMap) return;
-        this.slotMap.slots.forEach(slot => this.resetElement(slot.id));
+        this.slotMap.slots.forEach(slot => this.resetElement(slot.id, instant));
     }
 
     computeOrder(dest) {
@@ -1517,6 +1527,9 @@ class ReorderSession {
 
     commit() {
         if (!this.currentDest) return;
+        if (this.previewEngine) {
+            this.previewEngine.resetAll(true);
+        }
         if (this.hanMode) {
             const base = this.slotMap?.baseOrderStrips?.length ? this.slotMap.baseOrderStrips : cloneStripsData();
             const nextStrips = simulateStripsMove(base, this.sourceId, this.currentDest.stripIndex ?? 0, this.currentDest.index ?? 0);
@@ -1557,7 +1570,7 @@ class ReorderSession {
         lastDragPosition = null;
         setInsertHint(null, false);
         if (this.previewEngine) {
-            this.previewEngine.resetAll();
+            this.previewEngine.resetAll(true);
         }
     }
 }
