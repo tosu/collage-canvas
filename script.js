@@ -916,6 +916,100 @@ function downloadBlob(blob, filename) {
     URL.revokeObjectURL(url);
 }
 
+// ===== ZIP (store) - Pure JS =====
+let CRC_TABLE = null;
+function getCRCTable() {
+    if (CRC_TABLE) return CRC_TABLE;
+    CRC_TABLE = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) {
+            c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        }
+        CRC_TABLE[n] = c >>> 0;
+    }
+    return CRC_TABLE;
+}
+
+function crc32(buf) {
+    const table = getCRCTable();
+    let crc = 0 ^ -1;
+    for (let i = 0; i < buf.length; i++) {
+        crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xff];
+    }
+    return (crc ^ -1) >>> 0;
+}
+
+async function createZip(entries) {
+    const encoder = new TextEncoder();
+    const fileParts = [];
+    const centralParts = [];
+    let offset = 0;
+
+    for (const entry of entries) {
+        const data = new Uint8Array(await entry.blob.arrayBuffer());
+        const nameBytes = encoder.encode(entry.name);
+        const crc = crc32(data);
+        const size = data.byteLength;
+
+        const localHeader = new Uint8Array(30 + nameBytes.length);
+        const lhView = new DataView(localHeader.buffer);
+        lhView.setUint32(0, 0x04034b50, true); // signature
+        lhView.setUint16(4, 20, true); // version needed
+        lhView.setUint16(6, 0, true); // general flag
+        lhView.setUint16(8, 0, true); // compression 0
+        lhView.setUint16(10, 0, true); // mod time
+        lhView.setUint16(12, 0, true); // mod date
+        lhView.setUint32(14, crc, true);
+        lhView.setUint32(18, size, true); // compressed size
+        lhView.setUint32(22, size, true); // uncompressed size
+        lhView.setUint16(26, nameBytes.length, true); // name length
+        lhView.setUint16(28, 0, true); // extra length
+        localHeader.set(nameBytes, 30);
+
+        const centralHeader = new Uint8Array(46 + nameBytes.length);
+        const chView = new DataView(centralHeader.buffer);
+        chView.setUint32(0, 0x02014b50, true); // signature
+        chView.setUint16(4, 20, true); // version made by
+        chView.setUint16(6, 20, true); // version needed
+        chView.setUint16(8, 0, true); // flags
+        chView.setUint16(10, 0, true); // compression
+        chView.setUint16(12, 0, true); // mod time
+        chView.setUint16(14, 0, true); // mod date
+        chView.setUint32(16, crc, true);
+        chView.setUint32(20, size, true); // comp size
+        chView.setUint32(24, size, true); // uncomp size
+        chView.setUint16(28, nameBytes.length, true); // name length
+        chView.setUint16(30, 0, true); // extra length
+        chView.setUint16(32, 0, true); // comment length
+        chView.setUint16(34, 0, true); // disk number
+        chView.setUint16(36, 0, true); // internal attr
+        chView.setUint32(38, 0, true); // external attr
+        chView.setUint32(42, offset, true); // local header offset
+        centralHeader.set(nameBytes, 46);
+
+        fileParts.push(localHeader, data);
+        centralParts.push(centralHeader);
+        offset += localHeader.length + data.length;
+    }
+
+    const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+    const centralOffset = offset;
+    const eocd = new Uint8Array(22);
+    const eView = new DataView(eocd.buffer);
+    eView.setUint32(0, 0x06054b50, true); // signature
+    eView.setUint16(4, 0, true); // disk number
+    eView.setUint16(6, 0, true); // central dir disk
+    eView.setUint16(8, entries.length, true); // entries on this disk
+    eView.setUint16(10, entries.length, true); // total entries
+    eView.setUint32(12, centralSize, true); // central dir size
+    eView.setUint32(16, centralOffset, true); // central dir offset
+    eView.setUint16(20, 0, true); // comment length
+
+    const allParts = [...fileParts, ...centralParts, eocd];
+    return new Blob(allParts, { type: 'application/zip' });
+}
+
 async function handleFiles(files) {
     if (files.length === 0) return;
 
@@ -2434,9 +2528,11 @@ function renderExportPreviewList(entries) {
         name.textContent = item.name;
 
         const size = document.createElement('span');
+        size.className = 'dim';
         size.textContent = `${item.width} x ${item.height}`;
 
         const bytes = document.createElement('span');
+        bytes.className = 'bytes';
         bytes.textContent = formatBytes(item.size);
 
         row.appendChild(name);
@@ -2476,15 +2572,27 @@ function updateExportQualityVisibility() {
 }
 
 let previewRefreshTimer = null;
+let previewGenerationId = 0;
+let lastPreviewEntries = [];
 function refreshExportPreviewList() {
     if (previewRefreshTimer) clearTimeout(previewRefreshTimer);
+    const currentGen = ++previewGenerationId;
+    // mark loading without clearing list
+    if (exportPreviewList && lastPreviewEntries.length) {
+        exportPreviewList.querySelectorAll('.preview-list-item .bytes').forEach(el => {
+            el.textContent = '...';
+        });
+    } else if (exportPreviewList && !exportPreviewList.children.length) {
+        exportPreviewList.innerHTML = '<div class="empty-preview">计算中...</div>';
+    }
     previewRefreshTimer = setTimeout(async () => {
         const fmt = getSelectedFormat();
         const quality = fmt === 'jpg' ? exportConfig.quality : undefined;
-        if (exportPreviewList) {
-            exportPreviewList.innerHTML = '<div class="empty-preview">计算中...</div>';
-        }
         const entries = await collectExportPreviews(fmt, quality);
+        if (currentGen !== previewGenerationId) {
+            return;
+        }
+        lastPreviewEntries = entries;
         renderExportPreviewList(entries);
         previewRefreshTimer = null;
     }, 120);
@@ -2503,16 +2611,14 @@ async function handleExportAction(mode = 'single') {
         return;
     }
     if (mode === 'zip') {
-        if (typeof JSZip === 'undefined') {
-            // Fallback: sequential downloads
+        try {
+            const zipBlob = await createZip(entries);
+            downloadBlob(zipBlob, 'collage_export.zip');
+        } catch (err) {
+            console.warn('ZIP build failed, fallback to sequential downloads', err);
             entries.forEach(item => downloadBlob(item.blob, item.name));
-            showToast('未找到 JSZip，已逐个下载');
-            return;
+            showToast('打包失败，已逐个下载');
         }
-        const zip = new JSZip();
-        entries.forEach(item => zip.file(item.name, item.blob));
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
-        downloadBlob(zipBlob, 'collage_export.zip');
     } else {
         entries.forEach(item => downloadBlob(item.blob, item.name));
     }
