@@ -1,27 +1,29 @@
-# Bugfix Plan: 排序完成时元素“飞入”动效过大
+# Bugfix Plan: 无法将后面的元素拖到列表首位（普通模式）
 
-## 问题现象
-排序结束后，受影响的项会从远处飞入新位置（例如 `[A B]` -> `[B A]` 时，B 从左飞入、A 从右飞入），动画动静过大。
+## 现象
+- 列表 `[A B C D]` 中，将 `B/C/D` 拖到 `A` 前面时，没有预览提示，也无法完成排序。
+- 反向操作（把 `A` 拖到后面或原位）正常。
 
-## 根因
-- 预览阶段对受影响元素应用了 `transform` + `.preview-shift`（带 transition）。
-- 提交时 `commit()` 先改数据并 `render()`，写入新的 `left/top`/DOM 顺序，但旧的预览 `transform` 仍保留。
-- 紧接着 `cleanup()` 清空 `transform`，触发 transition：元素从旧预览位移过渡到 0，基座位置已变为新 slot，形成“大幅飞入”效果。
+## 根因分析
+- 普通模式的命中逻辑仅按 Y 轴/槽内命中；head/tail 区域要求指针的 X 落在现有内容范围内。
+- 当指针在列表最左侧（`minX` 之外）尝试插入首位时：
+  - `hitSlot` 失败（X 不在任一 box 内）；
+  - `head` 区域也失败（X 不在 strip 宽度范围内）；
+  - 边界/nearest 逻辑只看 Y，不处理“左侧越界插入”，最终返回 null → 无预览/无排序。
+- 因此缺少“左/右边界插入”分支，导致首/尾插入在 X 越界时不可达。
 
-## 目标
-- 保持预览阶段的平滑让位，但在提交/取消时避免因残留 transform + transition 导致的跨距离动画。
+## 修复思路
+- 在普通模式下，为 strip 添加显式的左右越界判定：指针 X < `minX - EDGE_DEAD_ZONE` 时直接指向首项（insertBefore），X > `maxX + EDGE_DEAD_ZONE` 指向尾项（insertAfter）。
+- 扩展 head/tail 区域的 X 范围（或在越界分支中忽略 X，按 Y 对齐当前 strip）以保障首位插入可达。
+- 保持现有迟滞/预览 transform 逻辑不变，确保只影响命中判定。
 
-## 方案
-1) **提交/取消前先移除预览 transform**
-   - 在 `commit()` 调用 `render()` 之前，调用 `previewEngine.resetAll()` 且暂时移除 `.preview-shift`（或清理 inline transition），确保提交后不再有残留 transform。
-   - 或在 `cleanup()` 开头无 transition 地清零 transform（临时禁用/覆写 transition），再 `render()`，避免过渡。
-
-2) **原子更新顺序**
-   - 顺序调整为：停止预览 → 清 transform/transition → 提交数据 + render → 恢复默认样式。
-
-3) **可选：提交阶段禁用动画**
-   - 提交前给受影响元素添加类如 `.no-transition` 禁用 transform transition，清零后移除该类。
+## 计划步骤
+1) 记录 strip 的 `minX/maxX`（已有 `stripMeta`），在普通模式的命中函数里增加 X 越界判定：
+   - `if (relX < minX - EDGE_DEAD_ZONE) -> target firstId, insertAfter=false`
+   - `if (relX > maxX + EDGE_DEAD_ZONE) -> target lastId, insertAfter=true`
+2) 可选：将 head/tail hit 区域的 X 范围扩展为 `minX - EDGE_DEAD_ZONE` 到 `maxX + EDGE_DEAD_ZONE`，防止因微小偏差 miss。
+3) 保持其余判定（hit/nearest/hysteresis）不变，确保已有预览/提交流程不受影响。
 
 ## 验收
-- 排序完成时元素无“跨半屏飞入”效果，只是位置即时更新或轻微过渡。
-- 预览阶段行为不变，取消排序也不会出现飞入。***
+- 普通模式下，将任意元素拖到列表最前/最后都能触发预览并完成排序，即便指针在内容左/右侧略微越界。
+- 其他场景（跨行、插中间、汉化模式）行为无回归。***
