@@ -1387,8 +1387,8 @@ class ReorderSession {
         const zoneHit = zones.find(z =>
             relY >= z.box.y &&
             relY <= z.box.y + z.box.height &&
-            relX >= z.box.x &&
-            relX <= z.box.x + z.box.width
+            relX >= z.box.x - EDGE_DEAD_ZONE &&
+            relX <= z.box.x + z.box.width + EDGE_DEAD_ZONE
         );
         const slots = this.slotMap.slotsByStrip[0] || [];
         if (zoneHit) {
@@ -1398,8 +1398,8 @@ class ReorderSession {
         const hitSlot = slots.find(slot =>
             relY >= slot.box.y &&
             relY <= slot.box.y + slot.box.height &&
-            relX >= slot.box.x &&
-            relX <= slot.box.x + slot.box.width
+            relX >= slot.box.x - EDGE_DEAD_ZONE &&
+            relX <= slot.box.x + slot.box.width + EDGE_DEAD_ZONE
         );
         if (hitSlot) {
             if (hitSlot.id === this.sourceId) {
@@ -1412,6 +1412,18 @@ class ReorderSession {
         }
 
         if (!slots.length) return null;
+
+        const meta = (this.slotMap.stripMeta || []).find(m => m.stripIndex === 0);
+        if (meta) {
+            if (relX < meta.minX - EDGE_DEAD_ZONE) {
+                const firstId = slots[0]?.id;
+                if (firstId) return { targetId: firstId, insertAfter: false, via: 'edge-x' };
+            }
+            if (relX > meta.maxX + EDGE_DEAD_ZONE) {
+                const lastId = slots[slots.length - 1]?.id;
+                if (lastId) return { targetId: lastId, insertAfter: true, via: 'edge-x' };
+            }
+        }
         const boundaries = [];
         slots.forEach(box => {
             boundaries.push({
