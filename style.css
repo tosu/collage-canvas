@@ -267,6 +267,11 @@ input[type="color"]::-webkit-color-swatch {
     margin-top: 0.35rem;
 }
 
+.hint-text.subtle {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.8rem;
+}
+
 .btn.han-disabled {
     cursor: not-allowed;
     opacity: 0.6;
