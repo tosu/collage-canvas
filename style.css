@@ -272,6 +272,144 @@ input[type="color"]::-webkit-color-swatch {
     font-size: 0.8rem;
 }
 
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 24px;
+}
+
+.modal-backdrop.active {
+    display: flex;
+}
+
+.modal {
+    background: #16161a;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    width: min(760px, 90vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.modal-header,
+.modal-footer {
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-footer {
+    border-bottom: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    gap: 12px;
+}
+
+.modal-body {
+    padding: 12px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow: auto;
+    max-height: 60vh;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.icon-btn.close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.form-label {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.radio-group {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.radio {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.inline-input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.inline-input input[type="range"] {
+    flex: 1;
+}
+
+.preview-list {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.preview-list-header,
+.preview-list-item {
+    display: grid;
+    grid-template-columns: 1fr 120px 120px;
+    align-items: center;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+}
+
+.preview-list-header {
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.preview-list-item {
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.preview-list-item .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.empty-preview {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
 .btn.han-disabled {
     cursor: not-allowed;
     opacity: 0.6;

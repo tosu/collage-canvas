@@ -30,6 +30,16 @@ const previewHint = document.querySelector('.preview-hint');
 const toastContainer = document.getElementById('toastContainer');
 const filenameToggle = document.getElementById('filenameToggle');
 let showFilenames = false;
+const exportModal = document.getElementById('exportModal');
+const exportModalClose = document.getElementById('exportModalClose');
+const exportFormatRadios = document.querySelectorAll('input[name="exportFormat"]');
+const exportQualitySlider = document.getElementById('exportQuality');
+const exportQualityValue = document.getElementById('exportQualityValue');
+const exportQualityRow = document.getElementById('qualityRow');
+const exportPreviewList = document.getElementById('exportPreviewList');
+const exportConfirmBtn = document.getElementById('exportConfirmBtn');
+const exportZipBtn = document.getElementById('exportZipBtn');
+let exportConfig = { format: 'png', quality: 0.92 };
 
 let loadedImages = []; // Array of { element: HTMLImageElement, aspectRatio: number, id: string }
 let dragSrcId = null; // Use ID instead of index for stability
@@ -663,6 +673,37 @@ if (filenameToggle) {
     });
 }
 
+if (exportModalClose) {
+    exportModalClose.addEventListener('click', closeExportModal);
+}
+
+if (exportFormatRadios && exportFormatRadios.length) {
+    exportFormatRadios.forEach(radio => {
+        radio.addEventListener('change', () => {
+            updateExportQualityVisibility();
+            refreshExportPreviewList();
+        });
+    });
+}
+
+if (exportQualitySlider) {
+    exportQualitySlider.addEventListener('input', (e) => {
+        const val = Number(e.target.value);
+        exportConfig.quality = Math.max(0.1, Math.min(val / 100, 0.95));
+        if (exportQualityValue) {
+            exportQualityValue.textContent = `${Math.round(exportConfig.quality * 100)}%`;
+        }
+        refreshExportPreviewList();
+    });
+}
+
+if (exportConfirmBtn) {
+    exportConfirmBtn.addEventListener('click', () => handleExportAction('single'));
+}
+if (exportZipBtn) {
+    exportZipBtn.addEventListener('click', () => handleExportAction('zip'));
+}
+
 updateHanControlsVisibility();
 // Disable copy button in han mode
 function updateCopyButtonState() {
@@ -741,18 +782,7 @@ clearBtn.addEventListener('click', () => {
 
 // Export
 exportBtn.addEventListener('click', () => {
-    const canvases = renderStripsToCanvases();
-    if (!canvases.length) {
-        showToast('没有可导出的图片');
-        return;
-    }
-    canvases.forEach((canvas, idx) => {
-        const link = document.createElement('a');
-        const suffix = canvases.length > 1 ? `_${String(idx + 1).padStart(2, '0')}` : '';
-        link.download = `collage${suffix}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-    });
+    openExportModal();
 });
 
 // Copy
@@ -863,6 +893,27 @@ function dataUrlToBlob(dataUrl) {
         u8arr[n] = bstr.charCodeAt(n);
     }
     return new Blob([u8arr], { type: mime });
+}
+
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const k = 1024;
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const size = bytes / Math.pow(k, i);
+    return `${size.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
+}
+
+function downloadBlob(blob, filename) {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
 }
 
 async function handleFiles(files) {
@@ -2337,3 +2388,133 @@ class TouchHandler {
 
 // Initialize Touch Handler
 new TouchHandler();
+async function collectExportPreviews(format = 'png', quality = 0.92) {
+    const canvases = renderStripsToCanvases();
+    const mime = format === 'jpg' ? 'image/jpeg' : 'image/png';
+    const suffix = format === 'jpg' ? 'jpg' : 'png';
+    const entries = [];
+    for (let i = 0; i < canvases.length; i++) {
+        const canvas = canvases[i];
+        const name = canvases.length > 1 ? `collage_${String(i + 1).padStart(2, '0')}.${suffix}` : `collage.${suffix}`;
+        const blob = await new Promise(resolve => {
+            canvas.toBlob((b) => {
+                if (b) return resolve(b);
+                try {
+                    const fallback = dataUrlToBlob(canvas.toDataURL(mime));
+                    resolve(fallback);
+                } catch (err) {
+                    resolve(null);
+                }
+            }, mime, mime === 'image/jpeg' ? quality : undefined);
+        });
+        if (!blob) continue;
+        entries.push({
+            name,
+            width: canvas.width,
+            height: canvas.height,
+            size: blob.size,
+            blob
+        });
+    }
+    return entries;
+}
+
+function renderExportPreviewList(entries) {
+    if (!exportPreviewList) return;
+    exportPreviewList.innerHTML = '';
+    if (!entries || !entries.length) {
+        exportPreviewList.innerHTML = '<div class="empty-preview">暂无可导出内容</div>';
+        return;
+    }
+    entries.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'preview-list-item';
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = item.name;
+
+        const size = document.createElement('span');
+        size.textContent = `${item.width} x ${item.height}`;
+
+        const bytes = document.createElement('span');
+        bytes.textContent = formatBytes(item.size);
+
+        row.appendChild(name);
+        row.appendChild(size);
+        row.appendChild(bytes);
+        exportPreviewList.appendChild(row);
+    });
+}
+
+function openExportModal() {
+    if (!exportModal) return;
+    exportModal.classList.add('active');
+    exportModal.setAttribute('aria-hidden', 'false');
+    updateExportQualityVisibility();
+    refreshExportPreviewList();
+}
+
+function closeExportModal() {
+    if (!exportModal) return;
+    exportModal.classList.remove('active');
+    exportModal.setAttribute('aria-hidden', 'true');
+}
+
+function getSelectedFormat() {
+    let fmt = exportConfig.format;
+    exportFormatRadios.forEach(r => {
+        if (r.checked) fmt = r.value;
+    });
+    return fmt === 'jpg' ? 'jpg' : 'png';
+}
+
+function updateExportQualityVisibility() {
+    const fmt = getSelectedFormat();
+    if (exportQualityRow) {
+        exportQualityRow.style.display = fmt === 'jpg' ? 'flex' : 'none';
+    }
+}
+
+let previewRefreshTimer = null;
+function refreshExportPreviewList() {
+    if (previewRefreshTimer) clearTimeout(previewRefreshTimer);
+    previewRefreshTimer = setTimeout(async () => {
+        const fmt = getSelectedFormat();
+        const quality = fmt === 'jpg' ? exportConfig.quality : undefined;
+        if (exportPreviewList) {
+            exportPreviewList.innerHTML = '<div class="empty-preview">计算中...</div>';
+        }
+        const entries = await collectExportPreviews(fmt, quality);
+        renderExportPreviewList(entries);
+        previewRefreshTimer = null;
+    }, 120);
+}
+
+async function handleExportAction(mode = 'single') {
+    const fmt = getSelectedFormat();
+    exportConfig.format = fmt;
+    if (fmt === 'jpg' && exportQualitySlider) {
+        const q = Number(exportQualitySlider.value) / 100;
+        exportConfig.quality = Math.max(0.1, Math.min(q, 0.95));
+    }
+    const entries = await collectExportPreviews(fmt, exportConfig.quality);
+    if (!entries.length) {
+        showToast('没有可导出的图片');
+        return;
+    }
+    if (mode === 'zip') {
+        if (typeof JSZip === 'undefined') {
+            // Fallback: sequential downloads
+            entries.forEach(item => downloadBlob(item.blob, item.name));
+            showToast('未找到 JSZip，已逐个下载');
+            return;
+        }
+        const zip = new JSZip();
+        entries.forEach(item => zip.file(item.name, item.blob));
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        downloadBlob(zipBlob, 'collage_export.zip');
+    } else {
+        entries.forEach(item => downloadBlob(item.blob, item.name));
+    }
+    closeExportModal();
+}
