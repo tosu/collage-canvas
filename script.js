@@ -28,6 +28,8 @@ const hanSingleWidthInput = document.getElementById('hanSingleWidth');
 const hanSingleWidthSlider = document.getElementById('hanSingleWidthSlider');
 const previewHint = document.querySelector('.preview-hint');
 const toastContainer = document.getElementById('toastContainer');
+const filenameToggle = document.getElementById('filenameToggle');
+let showFilenames = false;
 
 let loadedImages = []; // Array of { element: HTMLImageElement, aspectRatio: number, id: string }
 let dragSrcId = null; // Use ID instead of index for stability
@@ -654,6 +656,13 @@ if (hanGenerateBtn) {
     });
 }
 
+if (filenameToggle) {
+    filenameToggle.addEventListener('change', (e) => {
+        showFilenames = !!e.target.checked;
+        render();
+    });
+}
+
 updateHanControlsVisibility();
 // Disable copy button in han mode
 function updateCopyButtonState() {
@@ -871,7 +880,9 @@ async function handleFiles(files) {
                 resolve({
                     element: img,
                     aspectRatio: img.width / img.height,
-                    id: Math.random().toString(36).substr(2, 9)
+                    id: Math.random().toString(36).substr(2, 9),
+                    originalName: file.name,
+                    displayName: file.name
                 });
             };
             img.onerror = reject;
@@ -1084,6 +1095,13 @@ function render() {
             img.src = box.img.element.src;
             itemDiv.appendChild(img);
 
+            const badge = document.createElement('div');
+            badge.className = 'filename-badge';
+            badge.title = box.img.displayName || box.img.originalName || '';
+            badge.textContent = (box.img.displayName || box.img.originalName || '').split(/[\\/]/).pop() || '';
+            if (!showFilenames || !badge.textContent) badge.classList.add('hidden');
+            itemDiv.appendChild(badge);
+
             const deleteBtn = document.createElement('div');
             deleteBtn.className = 'delete-btn';
             deleteBtn.innerHTML = '✕';
@@ -1108,6 +1126,14 @@ function render() {
         itemDiv.dataset.index = index; // Update current index
         itemDiv.draggable = false;
         itemDiv.addEventListener('pointerdown', handleItemPointerDown);
+
+        // Update badge if exists
+        const badge = itemDiv.querySelector('.filename-badge');
+        if (badge) {
+            badge.title = box.img.displayName || box.img.originalName || '';
+            badge.textContent = (box.img.displayName || box.img.originalName || '').split(/[\\/]/).pop() || '';
+            badge.classList.toggle('hidden', !showFilenames || !badge.textContent);
+        }
     });
 
     // Remove elements that are no longer in the layout
@@ -1199,28 +1225,29 @@ class VisualPreviewEngine {
             return;
         }
 
-        const flatOrder = orderStrips.flat();
-        const flatSlots = this.slotMap.slots;
         const touched = new Set();
 
-        flatOrder.forEach((id, newIdx) => {
-            const targetSlot = flatSlots[newIdx];
-            const currentSlot = this.slotMap.idToSlot.get(id);
-            if (!targetSlot || !currentSlot) return;
+        orderStrips.forEach((stripOrder, stripIdx) => {
+            const stripSlots = this.slotMap.slotsByStrip[stripIdx] || [];
+            stripOrder.forEach((id, idxInStrip) => {
+                const targetSlot = stripSlots[idxInStrip];
+                const currentSlot = this.slotMap.idToSlot.get(id);
+                if (!targetSlot || !currentSlot) return;
 
-            const el = this.getElement(id);
-            if (!el) return;
+                const el = this.getElement(id);
+                if (!el) return;
 
-            const dx = (targetSlot.box.x - currentSlot.box.x);
-            const dy = (targetSlot.box.y - currentSlot.box.y);
-            const negligible = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5;
-            if (negligible) {
-                this.resetElement(id);
-            } else {
-                el.classList.add('preview-shift');
-                el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
-            }
-            touched.add(id);
+                const dx = (targetSlot.box.x - currentSlot.box.x);
+                const dy = (targetSlot.box.y - currentSlot.box.y);
+                const negligible = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5;
+                if (negligible) {
+                    this.resetElement(id);
+                } else {
+                    el.classList.add('preview-shift');
+                    el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+                }
+                touched.add(id);
+            });
         });
 
         // Clear transforms for untouched items
@@ -1265,6 +1292,8 @@ class ReorderSession {
         if (this.sourceElement) {
             this.sourceElement.classList.add('dragging');
             this.sourceElement.style.opacity = '0.2';
+            const badge = this.sourceElement.querySelector('.filename-badge');
+            if (badge) badge.remove();
         }
 
         setInsertHint(null, false);

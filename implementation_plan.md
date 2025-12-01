@@ -1,41 +1,40 @@
-# Slot 感知拖拽预览优化方案（跨 strip 友好）
+# 图片文件名标识（仅预览，不参与导出）实现方案
 
 ## 目标
-- 解决汉化多 strip 横向布局下跨 strip（尤其首/尾）命中困难的问题，让拖拽“指哪放哪”。
-- 保持现有实时预览的流畅性：只用 transform 让位，数据在 drop 时一次提交。
-- 兼容桌面/移动统一通路，缩放/平移状态下命中准确，无闪烁。
+- 在“长图发布”/普通模式下，为每张图片显示可开关的文件名标识，仅供排版参考。
+- 默认关闭，用户可一键显示/隐藏全部标识；导出/复制的图像不包含标识。
+- 保持当前排序/缩放/汉化模式等功能无回归。
 
-## 主要痛点（现状）
-- 判定轴错误：汉化模式下 `resolveTarget` 仍用 Y 轴作为主轴；strip 是按 X 排列，跨列时几乎不会触发 edge/命中。
-- 缺少虚拟 slot：slotMap 仅包含已有图片 box，没有“头/尾”虚拟槽；想插到 strip 的最前或最后没有可命中的区域。
-- 预览源节点未让位：被拖元素保持在起点（透明但不移位），在跨 strip 时遮挡/误导。
-- 边界判定未分离：edge 与 nearest 逻辑耦合到单轴，跨 strip 时无独立的“选 strip → 选位”流程。
+## 体验设计
+- 在侧边栏新增一个全局开关（如“显示文件名标识”），默认关闭；开启时所有图片左上角显示半透明标签。
+- 标签样式：小圆角胶囊，深色半透明底，白字，轻微阴影；超长名称截断并提供 title 提示。
+- 支持汉化模式/多 strip，同样位置展示；拖拽排序时标签跟随图片移动；镜像拖拽不必显示标签。
 
-## 设计原则
-- **先选 strip，再选位置**：按 X 轴（汉化）确定目标 strip，再按 Y 轴（或顺序）确定插入索引；普通模式保持单列逻辑。
-- **显式虚拟槽**：为每个 strip 构建 `head` / `tail` slot，提供首/尾插入的命中区域，配合迟滞。
-- **拖拽源让位**：源元素在预览中也随视觉槽位移动（或隐藏），避免原地残影干扰判定。
-- **状态机 + 迟滞**：slot 变更才触发预览更新；跨 strip/跨槽各自有 0.3/0.7 迟滞阈值。
-- **快照计算**：继续使用 drag-start 的 layout/scale/pan 快照，预览仅用 transform，不触发布局重排。
+## 数据与状态
+- 加载文件时保存 `originalName`（无扩展或含扩展均可，建议保留扩展，另存一份短名称用于展示）。
+- 组件级状态：`showFilenames`（布尔），与开关绑定；默认 false。可存储在内存即可，不必持久化。
 
-## 实施计划
-1) **SlotMap 增强**
-   - 为每个 strip 生成 `head` / `tail` 虚拟 slot（坐标覆盖 strip 区域的顶部/底部或前/后），写入 `type: 'head'|'tail'`。
-   - 在汉化模式下，slot 包含 `stripIndex`、`xRange`、`yRange`；普通模式保持一维。
+## 渲染策略
+- 在 `render()` 创建/更新每个 `.image-item` 时，插入或更新一个 `.filename-badge` 元素；当 `showFilenames` 为 false 或未找到名称时隐藏（class `hidden`）。
+- 样式通过 CSS 控制（不影响导出）：绝对定位左上，`pointer-events: none`；拖拽镜像不包含该元素。
+- 导出/复制路径不变，仅绘制图片本身；不需要特殊处理即可保证不出现在导出结果。
 
-2) **命中与边界判定重写**
-   - 汉化：先根据 X 轴落点选择 strip（含 DEAD_ZONE），无匹配时保持当前 strip；strip 内再用 Y 轴 + 迟滞计算插入点，允许命中 head/tail slot。
-   - 普通模式：沿现有轴，但支持 head/tail slot，迟滞不变。
-   - edge 逻辑：当落点超出 strip 左/右侧时，直接指向目标 strip 的 head/tail，确保首尾易达。
+## 交互/逻辑
+- 开关事件：更新 `showFilenames`，触发一次 `render()` 或在现有节点上批量 toggle class。
+- 排序/缩放/拖拽：标签作为 item 子节点随 transform/位移移动；在镜像克隆时可选择不克隆该元素（删除或不包含）。
+- 汉化模式：同普通模式渲染标签；不影响 strip 计算。
 
-3) **预览源节点移动/隐藏**
-   - 在预览引擎中，对 `sourceId` 应用与视觉槽位一致的 transform（或在拖拽时隐藏源节点并用 mirror/placeholder 占位）；取消后复位。
-
-4) **VisualPreviewEngine 调整**
-   - 基于目标 slot 重新计算视觉顺序：`dragSlot → targetSlot`，空出一格并给源节点应用 transform。
-   - 预览输入使用增强的 slotMap（含虚拟槽），strip 切换时只在 slot 改变时更新。
-
-5) **验收清单**
-   - 汉化模式：跨 strip 到首/尾一拖即中；横向移动能稳定切 strip，纵向能精准落位；源节点不留原地残影。
-   - 普通模式：首尾插入正常；预览依旧平滑。
-   - 缩放/平移状态下命中正确；取消拖拽时 transform 清理干净。
+## 实施步骤
+1) 状态与数据
+   - 在加载文件时将 `originalName`（与可选的 `displayName`）存入 `loadedImages` 元素。
+   - 添加全局开关状态 `showFilenames = false`；在 UI（侧栏控制区）新增一个 checkbox/switch。
+2) DOM 与样式
+   - 在 `render()` 的 item 创建/更新分支插入 `.filename-badge`（含文本、title）。
+   - CSS 新增 `.filename-badge` 与 `.filename-badge.hidden` 样式。
+3) 交互
+   - 开关 change 时：更新 `showFilenames`，调用 `render()` 或仅 toggle 现有 badge 的 `hidden` 类。
+   - 拖拽镜像：创建镜像后移除其中的 `.filename-badge`（防止悬浮叠加）。
+4) 验收
+   - 开关打开时所有图片显示文件名；关闭时全部隐藏。
+   - 拖拽/排序/缩放/汉化模式下标签随动且不影响布局；镜像不显示标签。
+   - 导出/复制的图像不包含标签。

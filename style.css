@@ -458,8 +458,31 @@ input[type="color"]::-webkit-color-swatch {
 }
 
 .preview-shift {
-    transition: transform 150ms ease-out;
+    transition: transform 90ms ease-out;
     will-change: transform;
+}
+
+.filename-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #f8fafc;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 999px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+}
+
+.filename-badge.hidden {
+    display: none;
 }
 
 /* Delete Button */
