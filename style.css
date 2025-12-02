@@ -563,6 +563,9 @@ input[type="color"]::-webkit-color-swatch {
     box-sizing: border-box;
     position: relative;
     overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
 }
 
 .preview-container {
@@ -570,6 +573,8 @@ input[type="color"]::-webkit-color-swatch {
     transform-origin: top left;
     transition: transform 0.22s ease, box-shadow 0.3s ease;
     will-change: transform;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .preview-hint {
@@ -612,6 +617,8 @@ input[type="color"]::-webkit-color-swatch {
     background: #2a2a2a;
     /* Placeholder while loading */
     border: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .image-item:hover {
@@ -630,6 +637,8 @@ input[type="color"]::-webkit-color-swatch {
     object-fit: cover;
     pointer-events: none;
     display: block;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .image-item.dragging {
@@ -661,6 +670,8 @@ input[type="color"]::-webkit-color-swatch {
     text-overflow: ellipsis;
     white-space: nowrap;
     letter-spacing: 0.02em;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .filename-badge.hidden {
