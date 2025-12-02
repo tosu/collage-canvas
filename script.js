@@ -716,29 +716,47 @@ updateCopyButtonState();
 
 // Drag & Drop (File Upload)
 dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    // Only show file drop styling if we are NOT reordering images
-    if (!dragSrcId) {
+    if (dragSrcId) return; // ignore when reordering
+    if (loadedImages.length === 0) {
+        const card = e.target.closest('.drop-card');
+        if (!card) return;
+        e.preventDefault();
+        card.classList.add('drag-over');
+    } else {
+        // allow global drop only when not reordering
+        e.preventDefault();
         dropZone.classList.add('drag-over');
     }
 });
 
 dropZone.addEventListener('dragleave', (e) => {
-    // Only remove class if we are truly leaving the dropZone (not entering a child)
-    if (e.relatedTarget && dropZone.contains(e.relatedTarget)) {
-        return;
+    if (loadedImages.length === 0) {
+        const card = dropZone.querySelector('.drop-card');
+        if (card) card.classList.remove('drag-over');
+    } else {
+        if (e.relatedTarget && dropZone.contains(e.relatedTarget)) return;
+        dropZone.classList.remove('drag-over');
     }
-    dropZone.classList.remove('drag-over');
 });
 
 dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-
-    // Check if it's a file drop
-    if (e.dataTransfer.files.length > 0) {
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-        handleFiles(files);
+    if (dragSrcId) return;
+    if (loadedImages.length === 0) {
+        const card = e.target.closest('.drop-card');
+        if (!card) return;
+        e.preventDefault();
+        card.classList.remove('drag-over');
+        if (e.dataTransfer.files.length > 0) {
+            const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+            handleFiles(files);
+        }
+    } else {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length > 0) {
+            const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+            handleFiles(files);
+        }
     }
 });
 
@@ -747,8 +765,8 @@ dropZone.addEventListener('click', (e) => {
     // Only trigger when empty-state is visible and click happens on the drop card/button
     if (loadedImages.length > 0) return;
 
-    const card = e.target.closest('.drop-card');
-    if (card || e.target.classList.contains('ghost-btn')) {
+    const button = e.target.closest('.ghost-btn');
+    if (button) {
         fileInput.click();
     }
 });
