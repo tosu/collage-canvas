@@ -1,22 +1,29 @@
-# Bugfix Plan: 预览区域不应出现文本选择/I 形光标
+# Bugfix Plan: 空状态交互范围 & 发光特效控制
 
 ## 现象
-- 在预览/图片区域，鼠标悬停时出现 I 形文本光标，可拖动选择图片或区域，影响拖拽排序与交互体验。
+1. 空状态下，整个 `.empty-state` 都能拖入/点击上传；期望仅 `.drop-card`（及按钮）响应。
+2. 拖入时发光/虚线框特效作用于整个 empty 区域；应只在卡片上。
+3. `.drop-card` 内出现 I 形光标，可选中文本；应保持默认/指针，仅按钮为 pointer。
 
-## 可能原因
-- 预览容器及其子元素未禁用文本选择（未设置 `user-select: none`）。
-- 浏览器默认行为对图片/文本节点允许 selection；拖拽镜像或标签（如文件名）也可能可选。
+## 目标
+- 收窄交互：只有 `.drop-card` 是拖入目标；只有 “选择图片” 按钮触发上传。
+- 发光特效只在 `.drop-card` 激活。
+- 去除卡片内文本选择/I 型光标。
+- 不影响已有行为：已有内容时依旧可全局拖入文件（目前 dropZone 允许），排序拖拽不受干扰。
 
-## 修复方案
-- CSS 全局或针对预览容器禁用选择：对 `.preview-wrapper`, `.preview-container`, `.image-item`, `.filename-badge` 等设置 `user-select: none; -webkit-user-select: none;`。
-- 确保鼠标指针为 `default` 或 `grab`（根据拖拽态），避免文本光标。
-- 若存在文本节点（文件名 badge），也需禁用选择。
+## 调整方案
+1) JS 事件范围
+   - `dragover/drop`: 在空状态时仅当 `e.target.closest('.drop-card')` 为真才 `preventDefault`、添加 hover/drag-over 类；否则忽略，让默认行为通过。
+   - `dragleave`: 仅在离开卡片时移除类。
+   - 点击上传：只在 `e.target.closest('.ghost-btn')` 或卡片内特定按钮时触发 `fileInput.click()`；移除对整个 `.empty-state` 的点击响应。
+   - 保留已有内容时的全局文件拖入逻辑（dropZone 外层仍可接收文件），需条件分支区分 empty vs has-content。
+2) CSS
+   - 将发光/虚线框效果从 `.drop-zone.drag-over::after` 改为 `.drop-card.drag-over::after`（或增加 `.drop-card.drag-over` 样式），避免整个区域高亮。
+   - `.drop-card`, `.drop-card *`: `user-select: none; cursor: default;`；按钮 `.ghost-btn` 设置 `cursor: pointer`。
+3) 冲突检查
+   - 确保排序拖拽使用的 `dragover` 不被阻断：添加 guard（仅当 `dragSrcId` 为空且 empty 状态时才走文件拖入分支）。
+   - 移动端点击空白不触发上传，保持现有逻辑。
 
-## 实施步骤
-1) 在 `style.css` 中为预览相关元素添加：
-   - `user-select: none; -webkit-user-select: none;`
-   - `cursor: default;`（基础态），拖拽时已有 `.dragging` 控制即可。
-2) 确认 badge/提示文字不被选中：对 `.filename-badge`, `.preview-hint` 等同样禁用选择。
-3) 验收：
-   - 在预览区域悬停不再出现 I 形光标；拖动不会选中文本/图片。
-   - 其他输入控件（侧栏表单）仍可选中文本。***
+## 验收
+- 空状态时只有卡片区域可拖入，发光/虚线只在卡片；点击卡片空白无效，按钮可上传。
+- 卡片内无 I 形光标，文本不可选；已有内容时拖入行为与排序不回归。***
