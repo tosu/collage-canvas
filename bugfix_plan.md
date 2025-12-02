@@ -1,37 +1,27 @@
-# Bugfix Plan: 导出预览闪烁 & ZIP 打包（原生实现方向）
+# Bugfix Plan: Toast 显示位置与样式异常
 
-## 问题概述
-1) 调整 JPG 压缩率时预览列表闪烁：列表先清空/“计算中”，完成后再重建，频繁操作时体验差。
-2) 当前打包提示“未找到 JSZip，已逐个下载”：没有依赖 JSZip。改用纯原生 JS 打包（自实现 ZIP）以去除外部依赖。
+## 现象
+- Toast 消息出现在渲染区域右侧，样式缺失或未按预期定位，显得杂乱、不美观。
 
-## 原因回顾
-- 闪烁源于刷新逻辑直接重置 innerHTML，再异步重建；滑杆输入频繁触发多次。
-- JSZip 缺失源于未引入依赖；这里改为原生 ZIP 写入，消除依赖需求。
+## 可能原因
+- toast 容器 `.toast-container` 的样式缺失/未生效：定位、宽度、背景、过渡等未定义或被覆盖。
+- 容器插入位置不正确：DOM 在预览区域内导致相对定位到内容右侧，而非固定到视口或页面角落。
+- 样式冲突：全局样式或移动端样式覆盖了 toast 的定位/布局。
 
-## 解决方向
-### A. 预览刷新防闪烁
-- 使用 generation token：每次刷新生成 token，异步完成时校验 token，一致才更新。
-- 不清空列表：保留现有 DOM，加载中只更新 size 字段为“...”或在顶部显示轻量提示，完成后逐项更新内容。
-- 保留 debounce（~120ms），避免滑杆抖动。
-
-### B. ZIP 原生实现替代 JSZip
-- 参考 JSZip 的文件格式写法，用纯 JS 构造 ZIP：
-  - 为每个文件生成本地文件头 (LFH)、中央目录 (CDH) 和 End of Central Directory (EOCD)。
-  - 计算 CRC32（可用纯 JS CRC 表算法），不压缩（store 模式），写入尺寸/偏移。
-  - 拼接 Uint8Array -> Blob -> 触发下载。
-- 这样无需外部库，避免“未找到 JSZip”提示。
+## 修复思路
+- 确认 DOM：toast 容器应放在顶层（如 `body` 内的绝对/固定定位），或在 `dropZone` 内但用 `position: fixed/absolute` 钉在视口右上角/右下角。
+- 统一样式：为 `.toast-container`、`.toast` 定义清晰的定位、尺寸、背景、边距和阴影，避免继承导致错位。
+- 渐隐动画：使用 `opacity` + `transform` 过渡让出现/消失更自然。
 
 ## 实施步骤
-1) 预览刷新
-   - 添加 `previewGenerationId`，刷新时 +1，Promise 完成后比对。
-   - 刷新期间保留列表节点，只把 size 文本置为“...”或添加 loading 类；完成后更新 name/size/WxH。
-2) 原生 ZIP
-   - 实现 CRC32（预计算表）。
-   - 写入 ZIP 结构（store）：LFH + data + CDH + EOCD。
-   - 提供 `createZip(files: {name, blob}[]) -> Blob`；在打包下载时调用。
-3) 提示
-   - 去掉 JSZip 缺失提示；若 ZIP 构建失败，fallback 逐个下载并 toast 明确原因。
+1) 样式补全
+   - `.toast-container`: `position: fixed; top/bottom + right; z-index: high; display: flex; flex-direction: column; gap; max-width`.
+   - `.toast`: 背景、文字颜色、圆角、阴影、内边距、过渡（opacity + translateY），初始/隐藏状态。
+2) DOM 位置
+   - 确认 `toastContainer` 在 `index.html` 的位置；如需，移动到 `body` 下或确保其定位上下文可控。
+3) 动效
+   - 保持现有移除逻辑或增加类名控制动画（可选：在插入时添加 `show` 类，延迟后移除）。
 
 ## 验收
-- 调节 JPG 质量时列表不中断、不闪屏，只在 size 列短暂显示“...”。
-- 打包下载无需外部依赖，生成的 ZIP 可正常解压；失败时明确提示且仍可逐个下载。***
+- Toast 固定在指定角落（如右上/右下），不随内容漂移；样式一致、可读。
+- 出现/消失平滑，无覆盖核心内容。*** End Patch

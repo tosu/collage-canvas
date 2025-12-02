@@ -272,6 +272,43 @@ input[type="color"]::-webkit-color-swatch {
     font-size: 0.8rem;
 }
 
+.toast-container {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 500;
+    max-width: 320px;
+    pointer-events: none;
+}
+
+.toast {
+    background: rgba(20, 20, 24, 0.92);
+    color: #f8fafc;
+    padding: 12px 14px;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.9rem;
+    line-height: 1.4;
+    transform: translateY(-8px);
+    opacity: 0;
+    animation: toast-in 140ms ease-out forwards;
+}
+
+@keyframes toast-in {
+    from {
+        transform: translateY(-8px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
 .modal-backdrop {
     position: fixed;
     inset: 0;
