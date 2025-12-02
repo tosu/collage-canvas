@@ -479,17 +479,7 @@ input[type="color"]::-webkit-color-swatch {
 }
 
 .drop-zone.drag-over::after {
-    content: '';
-    position: absolute;
-    inset: 20px;
-    border: 2px dashed var(--primary-color);
-    border-radius: var(--radius-lg);
-    padding: 40px;
-    box-sizing: border-box;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
+    display: none; /* glow handled on drop-card */
 }
 
 .drop-zone.has-content .empty-state {
@@ -506,18 +496,25 @@ input[type="color"]::-webkit-color-swatch {
     z-index: 2;
 }
 
-.drop-zone.drag-over::after {
-    display: none;
-}
-
 .drop-card {
+    width: 360px;
+    max-width: 80%;
+    padding: 28px;
+    border-radius: var(--radius-lg);
+    border: 1px dashed var(--input-border);
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(6px);
+    text-align: center;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
     cursor: default;
     user-select: none;
     -webkit-user-select: none;
-}
-
-.ghost-btn {
-    cursor: pointer;
 }
 
 .drop-card.drag-over::after {
@@ -532,6 +529,18 @@ input[type="color"]::-webkit-color-swatch {
     justify-content: center;
     align-items: center;
     overflow: hidden;
+}
+
+.ghost-btn {
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    color: var(--text-main);
+    margin-top: 6px;
+    cursor: pointer;
+}
+
+.ghost-btn:hover {
+    background: rgba(99, 102, 241, 0.2);
 }
 
 .drop-card {
@@ -730,94 +739,6 @@ input[type="color"]::-webkit-color-swatch {
 }
 
 
-.drop-zone {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: relative;
-    transition: all 0.3s ease;
-}
-
-.drop-zone.drag-over::after {
-    content: '';
-    position: absolute;
-    inset: 20px;
-    border: 2px dashed var(--primary-color);
-    border-radius: var(--radius-lg);
-    padding: 40px;
-    box-sizing: border-box;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-}
-
-.drop-zone.has-content .empty-state {
-    display: none;
-}
-
-.empty-state {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    pointer-events: auto;
-    z-index: 2;
-}
-
-.drop-card {
-    width: 360px;
-    max-width: 80%;
-    padding: 28px;
-    border-radius: var(--radius-lg);
-    border: 1px dashed var(--input-border);
-    background: rgba(255, 255, 255, 0.02);
-    backdrop-filter: blur(6px);
-    text-align: center;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.drop-card .icon {
-    font-size: 2.75rem;
-    line-height: 1;
-}
-
-.drop-card h3 {
-    font-size: 1.2rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text-main);
-}
-
-.drop-card p {
-    color: var(--text-muted);
-    font-size: 0.95rem;
-}
-
-.drop-card .hint {
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    letter-spacing: 0.02em;
-}
-
-.ghost-btn {
-    background: rgba(99, 102, 241, 0.12);
-    border: 1px solid rgba(99, 102, 241, 0.35);
-    color: var(--text-main);
-    margin-top: 6px;
-}
-
-.ghost-btn:hover {
-    background: rgba(99, 102, 241, 0.2);
-}
-
-/* Preview Wrapper */
 .preview-wrapper {
     width: 100%;
     height: 100%;
@@ -929,71 +850,6 @@ input[type="color"]::-webkit-color-swatch {
     transform: scale(1);
 }
 
-.drop-zone.drag-over::after {
-    content: '';
-    position: absolute;
-    inset: 20px;
-    border: 2px dashed var(--primary-color);
-    border-radius: var(--radius-lg);
-    padding: 40px;
-    box-sizing: border-box;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-}
-
-.drop-zone.has-content .empty-state {
-    display: none;
-}
-
-.empty-state {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    pointer-events: auto;
-    z-index: 2;
-}
-
-.drop-card {
-    width: 360px;
-    max-width: 80%;
-    padding: 28px;
-    border-radius: var(--radius-lg);
-    border: 1px dashed var(--input-border);
-    background: rgba(255, 255, 255, 0.02);
-    backdrop-filter: blur(6px);
-    text-align: center;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.drop-card .icon {
-    font-size: 2.75rem;
-    line-height: 1;
-}
-
-.drop-card h3 {
-    font-size: 1.2rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text-main);
-}
-
-.drop-card p {
-    color: var(--text-muted);
-    font-size: 0.95rem;
-}
-
-.drop-card .hint {
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    letter-spacing: 0.02em;
-}
 
 .ghost-btn {
     background: rgba(99, 102, 241, 0.12);
